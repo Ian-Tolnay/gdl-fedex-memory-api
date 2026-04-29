@@ -96,11 +96,7 @@ class AirtableClient:
             if value is None:
                 continue
             if isinstance(value, list):
-                # Airtable linked records and multi-selects are both lists. We store most list fields as CSV/text except Tags.
-                if key in {"tags", "Tags"}:
-                    cleaned[key] = value
-                else:
-                    cleaned[key] = ", ".join(str(v) for v in value)
+                cleaned[key] = ", ".join(str(v) for v in value)
             else:
                 cleaned[key] = value
         return cleaned
