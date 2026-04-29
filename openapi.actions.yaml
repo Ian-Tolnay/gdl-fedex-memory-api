@@ -1,0 +1,411 @@
+openapi: 3.1.0
+info:
+  title: GDL FedEx Memory Gateway API
+  version: "0.1.0"
+  description: Controlled memory gateway for the FedEx In-House Engineer MK2 project.
+servers:
+  - url: https://YOUR-RENDER-SERVICE.onrender.com
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Check service health
+      x-openai-isConsequential: false
+      responses:
+        "200":
+          description: Service status
+  /project/bootstrap:
+    get:
+      operationId: getProjectBootstrap
+      summary: Load compact current project state
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Project bootstrap context
+  /memory/search:
+    post:
+      operationId: searchMemory
+      summary: Search project memory records
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id, query]
+              properties:
+                project_id:
+                  type: string
+                query:
+                  type: string
+                record_types:
+                  type: array
+                  items:
+                    type: string
+                    enum: [project_state, decision, architecture, task, issue, validation, source_note, shipping_rule, wix_event_flow, fedex_api_note, inventory_note, handover_summary, operator_runbook, note]
+                tags:
+                  type: array
+                  items:
+                    type: string
+                status:
+                  type: string
+                  enum: [draft, pending_review, active, superseded, deprecated]
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 25
+                  default: 8
+                include_raw:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Ranked memory records
+  /context/build:
+    post:
+      operationId: buildContextPack
+      summary: Build a GPT-readable context pack
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id, query]
+              properties:
+                project_id:
+                  type: string
+                query:
+                  type: string
+                token_budget:
+                  type: integer
+                  minimum: 500
+                  maximum: 15000
+                  default: 2500
+                record_types:
+                  type: array
+                  items:
+                    type: string
+                    enum: [project_state, decision, architecture, task, issue, validation, source_note, shipping_rule, wix_event_flow, fedex_api_note, inventory_note, handover_summary, operator_runbook, note]
+                include_raw:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Compact context pack
+  /memory/write:
+    post:
+      operationId: writeMemory
+      summary: Write a draft memory record
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryWriteRequest"
+      responses:
+        "200":
+          description: Memory record written
+  /capture/quick:
+    post:
+      operationId: quickCapture
+      summary: Capture a quick note, decision, task, or issue
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id, text]
+              properties:
+                project_id:
+                  type: string
+                capture_type:
+                  type: string
+                  enum: [project_state, decision, architecture, task, issue, validation, source_note, shipping_rule, wix_event_flow, fedex_api_note, inventory_note, handover_summary, operator_runbook, note]
+                  default: note
+                text:
+                  type: string
+                title:
+                  type: string
+                priority:
+                  type: string
+                  enum: [low, medium, high, critical]
+                  default: medium
+                tags:
+                  type: array
+                  items:
+                    type: string
+                source_ref:
+                  type: string
+                review_status:
+                  type: string
+                  enum: [auto_accepted, pending_review, reviewed, rejected]
+                  default: pending_review
+      responses:
+        "200":
+          description: Captured memory result
+  /capture/session:
+    post:
+      operationId: closeSessionToMemory
+      summary: Capture a whole session into memory
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id, session_title, session_summary]
+              properties:
+                project_id:
+                  type: string
+                session_title:
+                  type: string
+                session_summary:
+                  type: string
+                decisions:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SessionItem"
+                tasks:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SessionItem"
+                issues:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SessionItem"
+                architecture_notes:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SessionItem"
+                validation_notes:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SessionItem"
+                next_actions:
+                  type: array
+                  items:
+                    type: string
+                source_chat_ref:
+                  type: string
+                review_status:
+                  type: string
+                  enum: [auto_accepted, pending_review, reviewed, rejected]
+                  default: pending_review
+      responses:
+        "200":
+          description: Session capture result
+  /capture/files:
+    post:
+      operationId: captureFiles
+      summary: Capture attached files as source evidence
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id, openaiFileIdRefs]
+              properties:
+                project_id:
+                  type: string
+                note:
+                  type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+                openaiFileIdRefs:
+                  type: array
+                  description: Up to 10 files attached in the ChatGPT conversation.
+                  items:
+                    type: object
+                    additionalProperties: true
+                    properties:
+                      name:
+                        type: string
+                      id:
+                        type: string
+                      mime_type:
+                        type: string
+                      download_link:
+                        type: string
+      responses:
+        "200":
+          description: File metadata captured
+  /validation/log:
+    post:
+      operationId: logValidationResult
+      summary: Log a test or validation result
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id, system, endpoint_or_feature, test_case, expected_result, actual_result, result]
+              properties:
+                project_id:
+                  type: string
+                system:
+                  type: string
+                endpoint_or_feature:
+                  type: string
+                test_case:
+                  type: string
+                expected_result:
+                  type: string
+                actual_result:
+                  type: string
+                result:
+                  type: string
+                  enum: [pass, fail, partial, blocked]
+                evidence_ref:
+                  type: string
+                linked_issue_id:
+                  type: string
+      responses:
+        "200":
+          description: Validation record logged
+  /tasks/open:
+    get:
+      operationId: getOpenTasks
+      summary: List open project tasks
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Open tasks
+  /issues/open:
+    get:
+      operationId: getOpenIssues
+      summary: List open project issues
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Open issues
+components:
+  schemas:
+    MemoryWriteRequest:
+      type: object
+      additionalProperties: false
+      required: [project_id, title, raw_body]
+      properties:
+        project_id:
+          type: string
+        record_type:
+          type: string
+          enum: [project_state, decision, architecture, task, issue, validation, source_note, shipping_rule, wix_event_flow, fedex_api_note, inventory_note, handover_summary, operator_runbook, note]
+          default: note
+        title:
+          type: string
+        raw_body:
+          type: string
+        human_summary:
+          type: string
+        status:
+          type: string
+          enum: [draft, pending_review, active, superseded, deprecated]
+          default: pending_review
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+        tags:
+          type: array
+          items:
+            type: string
+        linked_record_ids:
+          type: array
+          items:
+            type: string
+        source_refs:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.75
+        metadata:
+          type: object
+          additionalProperties: true
+        review_status:
+          type: string
+          enum: [auto_accepted, pending_review, reviewed, rejected]
+          default: pending_review
+    SessionItem:
+      type: object
+      additionalProperties: false
+      required: [title, summary]
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+        body:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+        tags:
+          type: array
+          items:
+            type: string
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
