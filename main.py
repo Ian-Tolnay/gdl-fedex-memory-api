@@ -74,20 +74,8 @@ def memory_write(req: MemoryWriteRequest) -> Dict[str, Any]:
 
 @app.post("/capture/quick", dependencies=[Depends(require_api_key)])
 def capture_quick(req: QuickCaptureRequest) -> Dict[str, Any]:
-    title = req.title or req.text[:80]
-    mreq = MemoryWriteRequest(
-        project_id=req.project_id,
-        record_type=req.capture_type,
-        title=title,
-        raw_body=req.text,
-        human_summary=req.text[:500],
-        priority=req.priority,
-        tags=req.tags,
-        source_refs=[req.source_ref] if req.source_ref else [],
-        review_status=req.review_status,
-    )
     try:
-        return svc().write_memory(mreq)
+        return svc().capture_quick(req)
     except AirtableError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

@@ -10,6 +10,7 @@ from models import (
     MemoryStatus,
     MemoryWriteRequest,
     Priority,
+    QuickCaptureRequest,
     RecordType,
     ReviewStatus,
     SessionCloseRequest,
@@ -125,6 +126,71 @@ class MemoryService:
             # Graph edge failure must not block primary memory creation in v0.1.
             pass
         return {"memory_id": compiled["memory_id"], "airtable_record_id": record.get("id"), "compiled": compiled}
+
+    def capture_quick(self, req: QuickCaptureRequest) -> Dict[str, Any]:
+        """
+        Quick capture wrapper.
+
+        Creates a normal Memory_Records row, then mirrors task/issue captures
+        into the dedicated dashboard tables.
+        """
+        title = req.title or req.text[:80]
+
+        mreq = MemoryWriteRequest(
+            project_id=req.project_id,
+            record_type=req.capture_type,
+            title=title,
+            raw_body=req.text,
+            human_summary=req.text[:500],
+            priority=req.priority,
+            tags=[*req.tags, req.capture_type.value],
+            source_refs=[req.source_ref] if req.source_ref else [],
+            metadata={"capture_mode": "quick_capture"},
+            review_status=req.review_status,
+        )
+
+        result = self.write_memory(mreq)
+        compiled = result.get("compiled", {})
+        memory_id = result["memory_id"]
+        created_at = compiled.get("created_at") or utc_now()
+
+        mirrored_to: List[str] = []
+
+        if req.capture_type == RecordType.task:
+            self.client.create_records(TABLES["tasks"], [{
+                "task_id": f"TASK-{memory_id}",
+                "project_id": req.project_id,
+                "title": title,
+                "status": "open",
+                "priority": req.priority.value,
+                "owner": "",
+                "due_date": "",
+                "linked_memory_ids": memory_id,
+                "notes": req.text,
+                "created_at": created_at,
+                "updated_at": created_at,
+            }])
+            mirrored_to.append("Tasks")
+
+        elif req.capture_type == RecordType.issue:
+            self.client.create_records(TABLES["issues"], [{
+                "issue_id": f"ISS-{memory_id}",
+                "project_id": req.project_id,
+                "title": title,
+                "severity": req.priority.value,
+                "status": "open",
+                "symptom": req.text,
+                "root_cause": "",
+                "workaround": "",
+                "resolution": "",
+                "linked_memory_ids": memory_id,
+                "created_at": created_at,
+                "updated_at": created_at,
+            }])
+            mirrored_to.append("Issues")
+
+        result["mirrored_to"] = mirrored_to
+        return result
 
     def search_memory(self, req: MemorySearchRequest) -> Dict[str, Any]:
         formulas = [project_formula(req.project_id)]
