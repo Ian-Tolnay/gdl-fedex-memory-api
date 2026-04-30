@@ -7,6 +7,7 @@ from airtable_client import AirtableClient, AirtableError, airtable_formula_equa
 from memory_compiler import compile_memory, make_session_id, make_validation_id, utc_now
 from models import (
     MemorySearchRequest,
+    MemoryScope,
     MemoryStatus,
     MemoryWriteRequest,
     Priority,
@@ -69,18 +70,42 @@ def to_airtable_fields(compiled: Dict[str, Any]) -> Dict[str, Any]:
 def project_formula(project_id: str) -> str:
     return airtable_formula_equals("project_id", project_id)
 
+def scope_formula(scope: MemoryScope) -> Optional[str]:
+    if scope == MemoryScope.active_only:
+        return "{status}='active'"
+
+    if scope == MemoryScope.pending_review:
+        return "OR({review_status}='pending_review', {status}='pending_review')"
+
+    if scope == MemoryScope.active_and_pending:
+        return "OR({status}='active', {status}='pending_review')"
+
+    if scope == MemoryScope.all_non_deprecated:
+        return "NOT({status}='deprecated')"
+
+    if scope == MemoryScope.all:
+        return None
+
+    return "NOT({status}='deprecated')"
 
 class MemoryService:
     def __init__(self, client: Optional[AirtableClient] = None):
         self.client = client or AirtableClient()
 
-    def project_bootstrap(self, project_id: str) -> Dict[str, Any]:
+    def project_bootstrap(self, project_id: str, scope: MemoryScope = MemoryScope.all_non_deprecated) -> Dict[str, Any]:
         project_records = self.client.list_records(TABLES["projects"], formula=project_formula(project_id), max_records=1)
         project = project_records[0].get("fields", {}) if project_records else {}
 
+        recent_formulas = [project_formula(project_id)]
+        scope_filter = scope_formula(scope)
+        if scope_filter:
+            recent_formulas.append(scope_filter)
+
+        recent_formula = "AND(" + ", ".join(recent_formulas) + ")" if len(recent_formulas) > 1 else recent_formulas[0]
+
         recent = self.client.list_records(
             TABLES["memory"],
-            formula=f"AND({project_formula(project_id)}, NOT({{status}}='deprecated'))",
+            formula=recent_formula,
             max_records=12,
         )
         tasks = self.client.list_records(
@@ -194,8 +219,14 @@ class MemoryService:
 
     def search_memory(self, req: MemorySearchRequest) -> Dict[str, Any]:
         formulas = [project_formula(req.project_id)]
+
         if req.status:
             formulas.append(airtable_formula_equals("status", req.status.value))
+        else:
+            scope_filter = scope_formula(req.scope)
+            if scope_filter:
+                formulas.append(scope_filter)
+
         if req.record_types:
             type_formula = "OR(" + ", ".join(airtable_formula_equals("record_type", t.value) for t in req.record_types) + ")"
             formulas.append(type_formula)
@@ -408,13 +439,22 @@ class MemoryService:
 
         return json.dumps(metadata, ensure_ascii=False)
 
-    def build_context(self, project_id: str, query: str, token_budget: int, record_types: Optional[List[RecordType]] = None, include_raw: bool = False) -> Dict[str, Any]:
+    def build_context(
+        self,
+        project_id: str,
+        query: str,
+        token_budget: int,
+        record_types: Optional[List[RecordType]] = None,
+        include_raw: bool = False,
+        scope: MemoryScope = MemoryScope.all_non_deprecated,
+    ) -> Dict[str, Any]:
         search = self.search_memory(MemorySearchRequest(
             project_id=project_id,
             query=query,
             record_types=record_types or [],
             limit=25,
             include_raw=include_raw,
+            scope=scope,
         ))
         lines: List[str] = [f"PROJECT={project_id}", f"QUERY={query}"]
         used = 0

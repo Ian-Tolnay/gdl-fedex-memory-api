@@ -15,6 +15,7 @@ from models import (
     MemoryApproveRequest,
     MemoryBulkReviewRequest,
     MemoryRejectRequest,
+    MemoryScope,
     MemorySearchRequest,
     MemoryWriteRequest,
     QuickCaptureRequest,
@@ -60,9 +61,12 @@ def health() -> Dict[str, str]:
 
 
 @app.get("/project/bootstrap", dependencies=[Depends(require_api_key)])
-def project_bootstrap(project_id: str = Query(...)) -> Dict[str, Any]:
+def project_bootstrap(
+    project_id: str = Query(...),
+    scope: MemoryScope = Query(default=MemoryScope.all_non_deprecated),
+) -> Dict[str, Any]:
     try:
-        return svc().project_bootstrap(project_id)
+        return svc().project_bootstrap(project_id, scope)
     except AirtableError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -141,7 +145,14 @@ def memory_bulk_review(req: MemoryBulkReviewRequest) -> Dict[str, Any]:
 @app.post("/context/build", dependencies=[Depends(require_api_key)])
 def context_build(req: ContextBuildRequest) -> Dict[str, Any]:
     try:
-        return svc().build_context(req.project_id, req.query, req.token_budget, req.record_types, req.include_raw)
+        return svc().build_context(
+            req.project_id,
+            req.query,
+            req.token_budget,
+            req.record_types,
+            req.include_raw,
+            req.scope,
+        )
     except AirtableError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

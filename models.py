@@ -45,6 +45,12 @@ class ReviewStatus(str, Enum):
     reviewed = "reviewed"
     rejected = "rejected"
 
+class MemoryScope(str, Enum):
+    active_only = "active_only"
+    pending_review = "pending_review"
+    active_and_pending = "active_and_pending"
+    all_non_deprecated = "all_non_deprecated"
+    all = "all"
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -76,7 +82,13 @@ class MemorySearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     record_types: List[RecordType] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
+
+    # Exact status filter overrides scope when provided.
     status: Optional[MemoryStatus] = None
+
+    # Controls whether retrieval uses trusted, pending, or broader memory.
+    scope: MemoryScope = Field(default=MemoryScope.all_non_deprecated)
+
     limit: int = Field(default=8, ge=1, le=25)
     include_raw: bool = Field(default=False)
 
@@ -187,3 +199,4 @@ class ContextBuildRequest(BaseModel):
     token_budget: int = Field(default=2500, ge=500, le=15000)
     record_types: List[RecordType] = Field(default_factory=list)
     include_raw: bool = False
+    scope: MemoryScope = Field(default=MemoryScope.all_non_deprecated)
