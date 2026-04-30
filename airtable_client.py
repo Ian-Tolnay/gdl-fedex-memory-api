@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Any, Dict, Iterable, List, Optional
@@ -91,14 +92,37 @@ class AirtableClient:
 
     @staticmethod
     def _clean_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert values into Airtable-safe v0.1 values.
+
+        v0.1 rule:
+        - Store most generated fields as text for maximum schema flexibility.
+        - Lists become comma-separated text.
+        - Dicts become JSON strings.
+        - Numbers become strings, because Airtable text fields reject raw numeric values.
+        - None values are omitted.
+        """
         cleaned: Dict[str, Any] = {}
+
         for key, value in fields.items():
             if value is None:
                 continue
+
             if isinstance(value, list):
                 cleaned[key] = ", ".join(str(v) for v in value)
+
+            elif isinstance(value, dict):
+                cleaned[key] = json.dumps(value, ensure_ascii=False)
+
+            elif isinstance(value, (int, float)):
+                cleaned[key] = str(value)
+
+            elif isinstance(value, bool):
+                cleaned[key] = "true" if value else "false"
+
             else:
                 cleaned[key] = value
+
         return cleaned
 
 
