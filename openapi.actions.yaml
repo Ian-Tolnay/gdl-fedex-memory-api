@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: GDL FedEx Memory Gateway API
-  version: "0.1.0"
+  version: "0.1.4"
   description: Controlled memory gateway for the FedEx In-House Engineer MK2 project.
 servers:
   - url: https://gdl-fedex-memory-api.onrender.com
@@ -14,6 +14,7 @@ paths:
       responses:
         "200":
           description: Service status
+
   /project/bootstrap:
     get:
       operationId: getProjectBootstrap
@@ -27,9 +28,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active_only, pending_review, active_and_pending, all_non_deprecated, all]
+            default: all_non_deprecated
       responses:
         "200":
           description: Project bootstrap context
+
   /memory/search:
     post:
       operationId: searchMemory
@@ -62,6 +71,12 @@ paths:
                 status:
                   type: string
                   enum: [draft, pending_review, active, superseded, deprecated]
+                  description: Optional exact status filter. If provided, it overrides scope.
+                scope:
+                  type: string
+                  enum: [active_only, pending_review, active_and_pending, all_non_deprecated, all]
+                  default: all_non_deprecated
+                  description: Controls which memory lifecycle records are searched.
                 limit:
                   type: integer
                   minimum: 1
@@ -73,6 +88,7 @@ paths:
       responses:
         "200":
           description: Ranked memory records
+
   /context/build:
     post:
       operationId: buildContextPack
@@ -106,9 +122,15 @@ paths:
                 include_raw:
                   type: boolean
                   default: false
+                scope:
+                  type: string
+                  enum: [active_only, pending_review, active_and_pending, all_non_deprecated, all]
+                  default: all_non_deprecated
+                  description: Controls which memory lifecycle records are used in the context pack.
       responses:
         "200":
           description: Compact context pack
+
   /memory/write:
     post:
       operationId: writeMemory
@@ -125,6 +147,7 @@ paths:
       responses:
         "200":
           description: Memory record written
+
   /capture/quick:
     post:
       operationId: quickCapture
@@ -168,6 +191,7 @@ paths:
       responses:
         "200":
           description: Captured memory result
+
   /capture/session:
     post:
       operationId: closeSessionToMemory
@@ -223,6 +247,7 @@ paths:
       responses:
         "200":
           description: Session capture result
+
   /capture/files:
     post:
       operationId: captureFiles
@@ -265,6 +290,7 @@ paths:
       responses:
         "200":
           description: File metadata captured
+
   /validation/log:
     post:
       operationId: logValidationResult
@@ -303,6 +329,7 @@ paths:
       responses:
         "200":
           description: Validation record logged
+
   /tasks/open:
     get:
       operationId: getOpenTasks
@@ -319,6 +346,7 @@ paths:
       responses:
         "200":
           description: Open tasks
+
   /issues/open:
     get:
       operationId: getOpenIssues
@@ -335,6 +363,7 @@ paths:
       responses:
         "200":
           description: Open issues
+
   /review/pending:
     get:
       operationId: getPendingReviews
@@ -415,6 +444,7 @@ paths:
       responses:
         "200":
           description: Memory rejected
+
   /memory/bulk_review:
     post:
       operationId: bulkReviewMemory
@@ -451,6 +481,7 @@ paths:
       responses:
         "200":
           description: Bulk review result
+
 components:
   schemas:
     MemoryWriteRequest:
@@ -502,6 +533,7 @@ components:
           type: string
           enum: [auto_accepted, pending_review, reviewed, rejected]
           default: pending_review
+
     SessionItem:
       type: object
       additionalProperties: false
@@ -521,6 +553,7 @@ components:
           type: array
           items:
             type: string
+
   securitySchemes:
     BearerAuth:
       type: http
