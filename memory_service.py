@@ -322,6 +322,57 @@ class MemoryService:
             "message": "Memory rejected",
         }
 
+    def bulk_review_memory(
+        self,
+        memory_ids: List[str],
+        action: str,
+        reviewer: Optional[str] = None,
+        review_note: Optional[str] = None,
+        new_status: MemoryStatus = MemoryStatus.active,
+    ) -> Dict[str, Any]:
+        """
+        Approve or reject multiple memory records in one request.
+
+        This reduces review friction and avoids approving/rejecting one record per prompt.
+        """
+        updated: List[Dict[str, Any]] = []
+        errors: List[Dict[str, str]] = []
+
+        for memory_id in memory_ids:
+            try:
+                if action == "approve":
+                    result = self.approve_memory(
+                        memory_id=memory_id,
+                        reviewer=reviewer,
+                        review_note=review_note,
+                        new_status=new_status,
+                    )
+                elif action == "reject":
+                    result = self.reject_memory(
+                        memory_id=memory_id,
+                        reviewer=reviewer,
+                        review_note=review_note,
+                    )
+                else:
+                    raise ValueError(f"Unsupported bulk review action: {action}")
+
+                updated.append(result)
+
+            except Exception as exc:
+                errors.append({
+                    "memory_id": memory_id,
+                    "error": str(exc),
+                })
+
+        return {
+            "action": action,
+            "requested_count": len(memory_ids),
+            "updated_count": len(updated),
+            "error_count": len(errors),
+            "updated": updated,
+            "errors": errors,
+        }
+
     def _find_memory_record(self, memory_id: str) -> Dict[str, Any]:
         records = self.client.list_records(
             TABLES["memory"],

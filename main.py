@@ -13,6 +13,7 @@ from models import (
     ContextBuildRequest,
     FileCaptureRequest,
     MemoryApproveRequest,
+    MemoryBulkReviewRequest,
     MemoryRejectRequest,
     MemorySearchRequest,
     MemoryWriteRequest,
@@ -120,6 +121,19 @@ def memory_reject(req: MemoryRejectRequest) -> Dict[str, Any]:
             memory_id=req.memory_id,
             reviewer=req.reviewer,
             review_note=req.review_note,
+        )
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+        
+@app.post("/memory/bulk_review", dependencies=[Depends(require_api_key)])
+def memory_bulk_review(req: MemoryBulkReviewRequest) -> Dict[str, Any]:
+    try:
+        return svc().bulk_review_memory(
+            memory_ids=req.memory_ids,
+            action=req.action,
+            reviewer=req.reviewer,
+            review_note=req.review_note,
+            new_status=req.new_status,
         )
     except AirtableError as exc:
         raise HTTPException(status_code=502, detail=str(exc))

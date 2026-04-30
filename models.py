@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -95,6 +95,15 @@ class MemoryRejectRequest(BaseModel):
     memory_id: str = Field(..., description="The memory_id to reject")
     reviewer: Optional[str] = Field(default=None)
     review_note: Optional[str] = Field(default=None)
+    
+class MemoryBulkReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    memory_ids: List[str] = Field(..., description="Memory IDs to approve or reject")
+    action: Literal["approve", "reject"] = Field(..., description="Review action to apply")
+    reviewer: Optional[str] = Field(default=None)
+    review_note: Optional[str] = Field(default=None)
+    new_status: MemoryStatus = Field(default=MemoryStatus.active)
 
 class QuickCaptureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
