@@ -56,6 +56,40 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
+class TaskStatusUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    status: Literal["open", "in_progress", "blocked", "complete", "cancelled"]
+    note: Optional[str] = None
+
+
+class TaskBulkStatusUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_ids: List[str]
+    status: Literal["open", "in_progress", "blocked", "complete", "cancelled"]
+    note: Optional[str] = None
+
+
+class IssueStatusUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issue_id: str
+    status: Literal["open", "investigating", "resolved", "parked"]
+    resolution: Optional[str] = None
+    note: Optional[str] = None
+
+
+class IssueBulkStatusUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issue_ids: List[str]
+    status: Literal["open", "investigating", "resolved", "parked"]
+    resolution: Optional[str] = None
+    note: Optional[str] = None
+
 class MemoryWriteRequest(BaseModel):
     """Stable, GPT-friendly memory write envelope."""
     model_config = ConfigDict(extra="forbid")

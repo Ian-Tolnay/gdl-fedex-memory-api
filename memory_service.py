@@ -519,6 +519,116 @@ class MemoryService:
             "errors": errors,
         }
 
+    def update_task_status(self, task_id: str, status: str, note: Optional[str] = None) -> Dict[str, Any]:
+        records = self.client.list_records(
+            TABLES["tasks"],
+            formula=airtable_formula_equals("task_id", task_id),
+            max_records=1,
+        )
+        if not records:
+            raise AirtableError(f"No task found for task_id={task_id}")
+
+        rec = records[0]
+        fields = rec.get("fields", {})
+        updates: Dict[str, Any] = {
+            "status": status,
+            "updated_at": utc_now(),
+        }
+
+        if note:
+            existing = str(fields.get("notes") or "")
+            updates["notes"] = (existing + f"\n[Status update] {note}").strip()
+
+        updated = self.client.update_record(TABLES["tasks"], rec["id"], updates)
+        return {
+            "task_id": task_id,
+            "airtable_record_id": updated.get("id"),
+            "status": status,
+            "message": "Task status updated",
+        }
+
+    def bulk_update_task_status(self, task_ids: List[str], status: str, note: Optional[str] = None) -> Dict[str, Any]:
+        updated: List[Dict[str, Any]] = []
+        errors: List[Dict[str, str]] = []
+
+        for task_id in task_ids:
+            try:
+                updated.append(self.update_task_status(task_id, status, note))
+            except Exception as exc:
+                errors.append({"task_id": task_id, "error": str(exc)})
+
+        return {
+            "status": status,
+            "requested_count": len(task_ids),
+            "updated_count": len(updated),
+            "error_count": len(errors),
+            "updated": updated,
+            "errors": errors,
+        }
+
+    def update_issue_status(
+        self,
+        issue_id: str,
+        status: str,
+        resolution: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        records = self.client.list_records(
+            TABLES["issues"],
+            formula=airtable_formula_equals("issue_id", issue_id),
+            max_records=1,
+        )
+        if not records:
+            raise AirtableError(f"No issue found for issue_id={issue_id}")
+
+        rec = records[0]
+        fields = rec.get("fields", {})
+        updates: Dict[str, Any] = {
+            "status": status,
+            "updated_at": utc_now(),
+        }
+
+        if resolution:
+            existing_resolution = str(fields.get("resolution") or "")
+            updates["resolution"] = (existing_resolution + f"\n{resolution}").strip()
+
+        if note:
+            existing_resolution = str(updates.get("resolution") or fields.get("resolution") or "")
+            updates["resolution"] = (existing_resolution + f"\n[Status note] {note}").strip()
+
+        updated = self.client.update_record(TABLES["issues"], rec["id"], updates)
+        return {
+            "issue_id": issue_id,
+            "airtable_record_id": updated.get("id"),
+            "status": status,
+            "message": "Issue status updated",
+        }
+
+    def bulk_update_issue_status(
+        self,
+        issue_ids: List[str],
+        status: str,
+        resolution: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        updated: List[Dict[str, Any]] = []
+        errors: List[Dict[str, str]] = []
+
+        for issue_id in issue_ids:
+            try:
+                updated.append(self.update_issue_status(issue_id, status, resolution, note))
+            except Exception as exc:
+                errors.append({"issue_id": issue_id, "error": str(exc)})
+
+        return {
+            "status": status,
+            "requested_count": len(issue_ids),
+            "updated_count": len(updated),
+            "error_count": len(errors),
+            "updated": updated,
+            "errors": errors,
+        }
+
     def _find_memory_record(self, memory_id: str) -> Dict[str, Any]:
         records = self.client.list_records(
             TABLES["memory"],

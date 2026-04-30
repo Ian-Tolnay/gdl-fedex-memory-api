@@ -482,6 +482,127 @@ paths:
         "200":
           description: Bulk review result
 
+
+  /tasks/update_status:
+    post:
+      operationId: updateTaskStatus
+      summary: Update one task status
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [task_id, status]
+              properties:
+                task_id:
+                  type: string
+                status:
+                  type: string
+                  enum: [open, in_progress, blocked, complete, cancelled]
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Task status updated
+
+  /tasks/bulk_update_status:
+    post:
+      operationId: bulkUpdateTaskStatus
+      summary: Update multiple task statuses
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [task_ids, status]
+              properties:
+                task_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: string
+                status:
+                  type: string
+                  enum: [open, in_progress, blocked, complete, cancelled]
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Bulk task status update result
+
+  /issues/update_status:
+    post:
+      operationId: updateIssueStatus
+      summary: Update one issue status
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [issue_id, status]
+              properties:
+                issue_id:
+                  type: string
+                status:
+                  type: string
+                  enum: [open, investigating, resolved, parked]
+                resolution:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Issue status updated
+
+  /issues/bulk_update_status:
+    post:
+      operationId: bulkUpdateIssueStatus
+      summary: Update multiple issue statuses
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [issue_ids, status]
+              properties:
+                issue_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: string
+                status:
+                  type: string
+                  enum: [open, investigating, resolved, parked]
+                resolution:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Bulk issue status update result
+
 components:
   schemas:
     MemoryWriteRequest:

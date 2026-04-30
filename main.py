@@ -22,6 +22,10 @@ from models import (
     RecordType,
     ValidationLogRequest,
     SessionCloseRequest,
+    IssueBulkStatusUpdateRequest,
+    IssueStatusUpdateRequest,
+    TaskBulkStatusUpdateRequest,
+    TaskStatusUpdateRequest,
 )
 
 app = FastAPI(
@@ -91,6 +95,38 @@ def capture_quick(req: QuickCaptureRequest) -> Dict[str, Any]:
 def memory_search(req: MemorySearchRequest) -> Dict[str, Any]:
     try:
         return svc().search_memory(req)
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/tasks/update_status", dependencies=[Depends(require_api_key)])
+def update_task_status(req: TaskStatusUpdateRequest) -> Dict[str, Any]:
+    try:
+        return svc().update_task_status(req.task_id, req.status, req.note)
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/tasks/bulk_update_status", dependencies=[Depends(require_api_key)])
+def bulk_update_task_status(req: TaskBulkStatusUpdateRequest) -> Dict[str, Any]:
+    try:
+        return svc().bulk_update_task_status(req.task_ids, req.status, req.note)
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/issues/update_status", dependencies=[Depends(require_api_key)])
+def update_issue_status(req: IssueStatusUpdateRequest) -> Dict[str, Any]:
+    try:
+        return svc().update_issue_status(req.issue_id, req.status, req.resolution, req.note)
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/issues/bulk_update_status", dependencies=[Depends(require_api_key)])
+def bulk_update_issue_status(req: IssueBulkStatusUpdateRequest) -> Dict[str, Any]:
+    try:
+        return svc().bulk_update_issue_status(req.issue_ids, req.status, req.resolution, req.note)
     except AirtableError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
