@@ -12,6 +12,8 @@ from memory_service import MemoryService
 from models import (
     ContextBuildRequest,
     FileCaptureRequest,
+    MemoryApproveRequest,
+    MemoryRejectRequest,
     MemorySearchRequest,
     MemoryWriteRequest,
     QuickCaptureRequest,
@@ -87,6 +89,40 @@ def memory_search(req: MemorySearchRequest) -> Dict[str, Any]:
     except AirtableError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
+@app.get("/review/pending", dependencies=[Depends(require_api_key)])
+def review_pending(
+    project_id: str = Query(...),
+    limit: int = Query(default=25, ge=1, le=50),
+) -> Dict[str, Any]:
+    try:
+        return svc().pending_reviews(project_id, limit)
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/memory/approve", dependencies=[Depends(require_api_key)])
+def memory_approve(req: MemoryApproveRequest) -> Dict[str, Any]:
+    try:
+        return svc().approve_memory(
+            memory_id=req.memory_id,
+            reviewer=req.reviewer,
+            review_note=req.review_note,
+            new_status=req.new_status,
+        )
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/memory/reject", dependencies=[Depends(require_api_key)])
+def memory_reject(req: MemoryRejectRequest) -> Dict[str, Any]:
+    try:
+        return svc().reject_memory(
+            memory_id=req.memory_id,
+            reviewer=req.reviewer,
+            review_note=req.review_note,
+        )
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
 @app.post("/context/build", dependencies=[Depends(require_api_key)])
 def context_build(req: ContextBuildRequest) -> Dict[str, Any]:

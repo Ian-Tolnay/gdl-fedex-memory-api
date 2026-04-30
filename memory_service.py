@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from airtable_client import AirtableClient, airtable_formula_equals
+from airtable_client import AirtableClient, AirtableError, airtable_formula_equals
 from memory_compiler import compile_memory, make_session_id, make_validation_id, utc_now
 from models import (
     MemorySearchRequest,
@@ -222,6 +222,140 @@ class MemoryService:
                 item["raw_body"] = f.get("raw_body")
             results.append(item)
         return {"query": req.query, "count": len(results), "results": results}
+
+    def pending_reviews(self, project_id: str, limit: int = 25) -> Dict[str, Any]:
+        formula = (
+            f"AND("
+            f"{project_formula(project_id)}, "
+            f"OR({{review_status}}='pending_review', {{status}}='pending_review')"
+            f")"
+        )
+
+        records = self.client.list_records(
+            TABLES["memory"],
+            formula=formula,
+            max_records=limit,
+        )
+
+        results = []
+        for rec in records:
+            fields = rec.get("fields", {})
+            results.append({
+                "airtable_record_id": rec.get("id"),
+                "memory_id": fields.get("memory_id"),
+                "record_type": fields.get("record_type"),
+                "title": fields.get("title"),
+                "human_summary": fields.get("human_summary"),
+                "semantic_capsule": fields.get("semantic_capsule"),
+                "ai_dense_line": fields.get("ai_dense_line"),
+                "status": fields.get("status"),
+                "review_status": fields.get("review_status"),
+                "priority": fields.get("priority"),
+                "tags": fields.get("tags"),
+                "created_at": fields.get("created_at"),
+            })
+
+        return {
+            "project_id": project_id,
+            "count": len(results),
+            "pending_reviews": results,
+        }
+
+    def approve_memory(
+        self,
+        memory_id: str,
+        reviewer: Optional[str] = None,
+        review_note: Optional[str] = None,
+        new_status: MemoryStatus = MemoryStatus.active,
+    ) -> Dict[str, Any]:
+        rec = self._find_memory_record(memory_id)
+        fields = rec.get("fields", {})
+        metadata_json = self._merge_review_metadata(
+            fields=fields,
+            action="approved",
+            reviewer=reviewer,
+            review_note=review_note,
+        )
+
+        updated = self.client.update_record(TABLES["memory"], rec["id"], {
+            "status": new_status.value,
+            "review_status": "reviewed",
+            "metadata_json": metadata_json,
+            "updated_at": utc_now(),
+        })
+
+        return {
+            "memory_id": memory_id,
+            "airtable_record_id": updated.get("id"),
+            "status": new_status.value,
+            "review_status": "reviewed",
+            "message": "Memory approved",
+        }
+
+    def reject_memory(
+        self,
+        memory_id: str,
+        reviewer: Optional[str] = None,
+        review_note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        rec = self._find_memory_record(memory_id)
+        fields = rec.get("fields", {})
+        metadata_json = self._merge_review_metadata(
+            fields=fields,
+            action="rejected",
+            reviewer=reviewer,
+            review_note=review_note,
+        )
+
+        updated = self.client.update_record(TABLES["memory"], rec["id"], {
+            "status": "deprecated",
+            "review_status": "rejected",
+            "metadata_json": metadata_json,
+            "updated_at": utc_now(),
+        })
+
+        return {
+            "memory_id": memory_id,
+            "airtable_record_id": updated.get("id"),
+            "status": "deprecated",
+            "review_status": "rejected",
+            "message": "Memory rejected",
+        }
+
+    def _find_memory_record(self, memory_id: str) -> Dict[str, Any]:
+        records = self.client.list_records(
+            TABLES["memory"],
+            formula=airtable_formula_equals("memory_id", memory_id),
+            max_records=1,
+        )
+
+        if not records:
+            raise AirtableError(f"No memory record found for memory_id={memory_id}")
+
+        return records[0]
+
+    def _merge_review_metadata(
+        self,
+        fields: Dict[str, Any],
+        action: str,
+        reviewer: Optional[str] = None,
+        review_note: Optional[str] = None,
+    ) -> str:
+        raw_metadata = fields.get("metadata_json") or "{}"
+
+        try:
+            metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else dict(raw_metadata)
+        except Exception:
+            metadata = {"previous_metadata_json": str(raw_metadata)}
+
+        metadata["review"] = {
+            "action": action,
+            "reviewer": reviewer or "",
+            "review_note": review_note or "",
+            "reviewed_at": utc_now(),
+        }
+
+        return json.dumps(metadata, ensure_ascii=False)
 
     def build_context(self, project_id: str, query: str, token_budget: int, record_types: Optional[List[RecordType]] = None, include_raw: bool = False) -> Dict[str, Any]:
         search = self.search_memory(MemorySearchRequest(

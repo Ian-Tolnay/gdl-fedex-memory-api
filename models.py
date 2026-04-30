@@ -80,6 +80,21 @@ class MemorySearchRequest(BaseModel):
     limit: int = Field(default=8, ge=1, le=25)
     include_raw: bool = Field(default=False)
 
+class MemoryApproveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(..., description="The memory_id to approve")
+    reviewer: Optional[str] = Field(default=None)
+    review_note: Optional[str] = Field(default=None)
+    new_status: MemoryStatus = Field(default=MemoryStatus.active)
+
+
+class MemoryRejectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(..., description="The memory_id to reject")
+    reviewer: Optional[str] = Field(default=None)
+    review_note: Optional[str] = Field(default=None)
 
 class QuickCaptureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -335,6 +335,86 @@ paths:
       responses:
         "200":
           description: Open issues
+  /review/pending:
+    get:
+      operationId: getPendingReviews
+      summary: List pending memory records awaiting review
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 25
+      responses:
+        "200":
+          description: Pending memory records
+
+  /memory/approve:
+    post:
+      operationId: approveMemory
+      summary: Approve a pending memory record
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [memory_id]
+              properties:
+                memory_id:
+                  type: string
+                reviewer:
+                  type: string
+                review_note:
+                  type: string
+                new_status:
+                  type: string
+                  enum: [draft, pending_review, active, superseded, deprecated]
+                  default: active
+      responses:
+        "200":
+          description: Memory approved
+
+  /memory/reject:
+    post:
+      operationId: rejectMemory
+      summary: Reject a pending memory record
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [memory_id]
+              properties:
+                memory_id:
+                  type: string
+                reviewer:
+                  type: string
+                review_note:
+                  type: string
+      responses:
+        "200":
+          description: Memory rejected
 components:
   schemas:
     MemoryWriteRequest:
