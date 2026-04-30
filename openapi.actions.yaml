@@ -4,7 +4,7 @@ info:
   version: "0.1.0"
   description: Controlled memory gateway for the FedEx In-House Engineer MK2 project.
 servers:
-  - url: https://YOUR-RENDER-SERVICE.onrender.com
+  - url: https://gdl-fedex-memory-api.onrender.com
 paths:
   /health:
     get:
