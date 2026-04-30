@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from airtable_client import AirtableClient, AirtableError, airtable_formula_equals
@@ -308,12 +309,29 @@ class MemoryService:
             review_note=review_note,
         )
 
-        updated = self.client.update_record(TABLES["memory"], rec["id"], {
+        update_fields = {
+
+
             "status": new_status.value,
+
+
             "review_status": "reviewed",
+
+
             "metadata_json": metadata_json,
+
+
             "updated_at": utc_now(),
-        })
+
+
+        }
+
+
+        update_fields.update(self._lifecycle_text_updates(fields, new_status.value))
+
+
+
+        updated = self.client.update_record(TABLES["memory"], rec["id"], update_fields)
 
         return {
             "memory_id": memory_id,
@@ -338,12 +356,32 @@ class MemoryService:
             review_note=review_note,
         )
 
-        updated = self.client.update_record(TABLES["memory"], rec["id"], {
+        update_fields = {
+
+
             "status": "deprecated",
+
+
             "review_status": "rejected",
+
+
             "metadata_json": metadata_json,
+
+
             "updated_at": utc_now(),
-        })
+
+
+        }
+
+
+        update_fields.update(self._lifecycle_text_updates(fields, "deprecated"))
+
+
+
+        updated = self.client.update_record(TABLES["memory"], rec["id"], update_fields)
+
+
+        mirrored_sync = self._sync_mirrored_record_status(memory_id, fields, action="reject")
 
         return {
             "memory_id": memory_id,
@@ -351,7 +389,84 @@ class MemoryService:
             "status": "deprecated",
             "review_status": "rejected",
             "message": "Memory rejected",
+            "mirrored_sync": mirrored_sync,
         }
+
+    def _lifecycle_text_updates(self, fields: Dict[str, Any], status_value: str) -> Dict[str, Any]:
+        """
+        Refresh derived GPT-facing text fields after status/review changes.
+
+        Earlier v0.1 records compiled semantic_capsule and ai_dense_line once at creation time.
+        If a memory was later approved/rejected, the real Airtable status changed but these
+        dense text fields could still say S=pending_review. This keeps retrieved context honest.
+        """
+        updates: Dict[str, Any] = {}
+
+        capsule = str(fields.get("semantic_capsule") or "")
+        if capsule:
+            if re.search(r"Status:\s*[^.]+", capsule):
+                capsule = re.sub(r"Status:\s*[^.]+", f"Status: {status_value}", capsule)
+            else:
+                capsule = capsule.rstrip(".") + f". Status: {status_value}."
+            updates["semantic_capsule"] = capsule
+
+        dense = str(fields.get("ai_dense_line") or "")
+        if dense:
+            if "|S=" in dense:
+                dense = re.sub(r"\|S=[^|]*", f"|S={status_value}", dense)
+            else:
+                dense = dense + f"|S={status_value}"
+            updates["ai_dense_line"] = dense
+
+        return updates
+
+    def _find_mirrored_records(self, table: str, memory_id: str) -> List[Dict[str, Any]]:
+        """Find task/issue dashboard rows linked to a memory_id."""
+        formula = f"FIND('{memory_id}', {{linked_memory_ids}}) > 0"
+        try:
+            return self.client.list_records(table, formula=formula, max_records=25)
+        except Exception:
+            return []
+
+    def _sync_mirrored_record_status(self, memory_id: str, fields: Dict[str, Any], action: str) -> List[Dict[str, Any]]:
+        """
+        Keep mirrored dashboard rows aligned with rejected memory.
+
+        If a task/issue memory is rejected as test/noise, its mirrored Tasks/Issues row should
+        stop appearing as a live open item in bootstrap/open-task/open-issue views.
+        """
+        synced: List[Dict[str, Any]] = []
+        record_type = str(fields.get("record_type") or "")
+        now = utc_now()
+
+        if action != "reject":
+            return synced
+
+        if record_type == "task":
+            for rec in self._find_mirrored_records(TABLES["tasks"], memory_id):
+                existing = rec.get("fields", {})
+                existing_notes = str(existing.get("notes") or "")
+                note = (existing_notes + "\n[Memory review] Cancelled because linked memory was rejected.").strip()
+                self.client.update_record(TABLES["tasks"], rec["id"], {
+                    "status": "cancelled",
+                    "notes": note,
+                    "updated_at": now,
+                })
+                synced.append({"table": "Tasks", "airtable_record_id": rec.get("id"), "status": "cancelled"})
+
+        elif record_type == "issue":
+            for rec in self._find_mirrored_records(TABLES["issues"], memory_id):
+                existing = rec.get("fields", {})
+                existing_resolution = str(existing.get("resolution") or "")
+                resolution = (existing_resolution + "\n[Memory review] Parked because linked memory was rejected.").strip()
+                self.client.update_record(TABLES["issues"], rec["id"], {
+                    "status": "parked",
+                    "resolution": resolution,
+                    "updated_at": now,
+                })
+                synced.append({"table": "Issues", "airtable_record_id": rec.get("id"), "status": "parked"})
+
+        return synced
 
     def bulk_review_memory(
         self,
