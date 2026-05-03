@@ -689,16 +689,36 @@ class MemoryService:
             response["result"] = result
             return response
 
+        if intent == "task_status":
+            result = self._brain_update_task_from_command(req.project_id, command)
+            response["actions"].append({"action": "task_status_from_command", "result": result})
+            response["result"] = result
+            return response
+
+        if intent == "issue_status":
+            result = self._brain_update_issue_from_command(req.project_id, command)
+            response["actions"].append({"action": "issue_status_from_command", "result": result})
+            response["result"] = result
+            return response
+
         if intent == "commit":
             summary = (req.visible_context_summary or "").strip()
             if not summary:
                 summary = command
 
             session_title = self._make_brain_session_title(command, summary)
+            sections = self._parse_brain_commit_sections(summary)
+
             session_req = SessionCloseRequest(
                 project_id=req.project_id,
                 session_title=session_title,
-                session_summary=summary,
+                session_summary=sections.get("session_summary") or summary,
+                decisions=sections.get("decisions", []),
+                tasks=sections.get("tasks", []),
+                issues=sections.get("issues", []),
+                architecture_notes=sections.get("architecture_notes", []),
+                validation_notes=sections.get("validation_notes", []),
+                next_actions=sections.get("next_actions", []),
                 source_chat_ref=req.source_chat_ref,
                 review_status=req.review_status,
             )
@@ -751,6 +771,36 @@ class MemoryService:
 
     def _classify_brain_intent(self, command: str) -> str:
         c = command.lower().strip()
+
+        if any(p in c for p in [
+            "brain done",
+            "task done",
+            "complete task",
+            "mark task",
+            "mark the task",
+            "task is done",
+            "task is complete",
+            "cancel task",
+            "block task",
+            "set task",
+            "move task",
+        ]):
+            return "task_status"
+
+        if any(p in c for p in [
+            "brain resolved",
+            "issue resolved",
+            "resolve issue",
+            "mark issue",
+            "park issue",
+            "issue is resolved",
+            "issue is fixed",
+            "set issue",
+            "move issue",
+            "reopen issue",
+        ]):
+            return "issue_status"
+
 
         if any(p in c for p in [
             "wake brain",
@@ -875,6 +925,233 @@ class MemoryService:
 
         first_sentence = re.split(r"[.\n]", summary.strip())[0].strip()
         return (first_sentence or "Brain session commit")[:180]
+
+    def _parse_brain_commit_sections(self, text: str) -> Dict[str, Any]:
+        # Parse a GPT-provided visible_context_summary into structured session sections.
+        buckets: Dict[str, List[str]] = {
+            "summary": [],
+            "decisions": [],
+            "tasks": [],
+            "issues": [],
+            "architecture_notes": [],
+            "validation_notes": [],
+            "next_actions": [],
+        }
+
+        aliases = {
+            "summary": "summary",
+            "session summary": "summary",
+            "decisions": "decisions",
+            "decision": "decisions",
+            "tasks": "tasks",
+            "task": "tasks",
+            "issues": "issues",
+            "issue": "issues",
+            "architecture": "architecture_notes",
+            "architecture notes": "architecture_notes",
+            "architecture note": "architecture_notes",
+            "validation": "validation_notes",
+            "validation notes": "validation_notes",
+            "validation note": "validation_notes",
+            "next actions": "next_actions",
+            "next action": "next_actions",
+            "next steps": "next_actions",
+        }
+
+        current = "summary"
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            heading = re.match(r"^([A-Za-z _/-]+)\s*:\s*(.*)$", line)
+            if heading:
+                key = heading.group(1).strip().lower().replace("-", " ")
+                rest = heading.group(2).strip()
+                if key in aliases:
+                    current = aliases[key]
+                    if rest:
+                        buckets[current].append(rest)
+                    continue
+
+            cleaned = re.sub(r"^\s*[-*•]?\s*\d*[\).]?\s*", "", line).strip()
+            if cleaned:
+                buckets[current].append(cleaned)
+
+        def priority_for(kind: str, value: str) -> Priority:
+            lower = value.lower()
+            if any(w in lower for w in ["critical", "security", "broken", "failed", "failure", "blocked"]):
+                return Priority.critical
+            if kind in {"decisions", "issues", "architecture_notes"}:
+                return Priority.high
+            return Priority.medium
+
+        def make_items(kind: str) -> List[SessionItem]:
+            items: List[SessionItem] = []
+            for value in buckets.get(kind, []):
+                if not value:
+                    continue
+                title = value[:120]
+                items.append(SessionItem(
+                    title=title,
+                    summary=value,
+                    body=value,
+                    priority=priority_for(kind, value),
+                    tags=["brain_commit", kind],
+                ))
+            return items
+
+        session_summary = " ".join(buckets.get("summary") or []).strip()
+        if not session_summary:
+            session_summary = text.strip()[:1200]
+
+        return {
+            "session_summary": session_summary,
+            "decisions": make_items("decisions"),
+            "tasks": make_items("tasks"),
+            "issues": make_items("issues"),
+            "architecture_notes": make_items("architecture_notes"),
+            "validation_notes": make_items("validation_notes"),
+            "next_actions": buckets.get("next_actions", []),
+        }
+
+    def _extract_task_ids_from_command(self, command: str) -> List[str]:
+        return list(dict.fromkeys(re.findall(r"TASK-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", command)))
+
+    def _extract_issue_ids_from_command(self, command: str) -> List[str]:
+        return list(dict.fromkeys(re.findall(r"ISS-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", command)))
+
+    def _infer_task_status_from_command(self, command: str) -> str:
+        c = command.lower()
+        if any(w in c for w in ["cancel", "cancelled", "canceled", "no longer needed", "not needed"]):
+            return "cancelled"
+        if any(w in c for w in ["block", "blocked", "waiting", "stuck"]):
+            return "blocked"
+        if any(w in c for w in ["in progress", "started", "working on"]):
+            return "in_progress"
+        return "complete"
+
+    def _infer_issue_status_from_command(self, command: str) -> str:
+        c = command.lower()
+        if any(w in c for w in ["park", "parked", "defer", "deferred"]):
+            return "parked"
+        if any(w in c for w in ["investigating", "investigate", "still checking"]):
+            return "investigating"
+        if any(w in c for w in ["reopen", "still open", "not resolved"]):
+            return "open"
+        return "resolved"
+
+    def _brain_update_task_from_command(self, project_id: str, command: str) -> Dict[str, Any]:
+        status = self._infer_task_status_from_command(command)
+        task_ids = self._extract_task_ids_from_command(command)
+
+        if task_ids:
+            if len(task_ids) == 1:
+                return self.update_task_status(task_ids[0], status, f"Updated by Brain command: {command}")
+            return self.bulk_update_task_status(task_ids, status, f"Updated by Brain command: {command}")
+
+        tasks = self.open_tasks(project_id).get("tasks", [])
+        scored = []
+        for task in tasks:
+            title = str(task.get("title") or "")
+            notes = str(task.get("notes") or "")
+            task_id = str(task.get("task_id") or "")
+            score = self._overlap_score(f"{title} {notes}", command)
+            if task_id and score >= 0.45:
+                scored.append((score, task))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        if not scored:
+            return {
+                "needs_disambiguation": True,
+                "reason": "No strong task match found.",
+                "intended_status": status,
+                "open_tasks": tasks[:8],
+            }
+
+        top_score, top_task = scored[0]
+        second_score = scored[1][0] if len(scored) > 1 else 0.0
+
+        if top_score >= 0.65 or (top_score >= 0.5 and top_score - second_score >= 0.2):
+            task_id = str(top_task.get("task_id"))
+            update = self.update_task_status(task_id, status, f"Updated by Brain command: {command}")
+            return {
+                "matched_task": top_task,
+                "match_score": round(top_score, 3),
+                "update": update,
+            }
+
+        return {
+            "needs_disambiguation": True,
+            "reason": "Multiple possible task matches.",
+            "intended_status": status,
+            "candidates": [item for _, item in scored[:5]],
+        }
+
+    def _brain_update_issue_from_command(self, project_id: str, command: str) -> Dict[str, Any]:
+        status = self._infer_issue_status_from_command(command)
+        issue_ids = self._extract_issue_ids_from_command(command)
+
+        if issue_ids:
+            if len(issue_ids) == 1:
+                return self.update_issue_status(
+                    issue_ids[0],
+                    status,
+                    f"Updated by Brain command: {command}",
+                    "Updated by Brain command.",
+                )
+            return self.bulk_update_issue_status(
+                issue_ids,
+                status,
+                f"Updated by Brain command: {command}",
+                "Updated by Brain command.",
+            )
+
+        issues = self.open_issues(project_id).get("issues", [])
+        scored = []
+        for issue in issues:
+            title = str(issue.get("title") or "")
+            symptom = str(issue.get("symptom") or "")
+            issue_id = str(issue.get("issue_id") or "")
+            score = self._overlap_score(f"{title} {symptom}", command)
+            if issue_id and score >= 0.45:
+                scored.append((score, issue))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        if not scored:
+            return {
+                "needs_disambiguation": True,
+                "reason": "No strong issue match found.",
+                "intended_status": status,
+                "open_issues": issues[:8],
+            }
+
+        top_score, top_issue = scored[0]
+        second_score = scored[1][0] if len(scored) > 1 else 0.0
+
+        if top_score >= 0.65 or (top_score >= 0.5 and top_score - second_score >= 0.2):
+            issue_id = str(top_issue.get("issue_id"))
+            update = self.update_issue_status(
+                issue_id,
+                status,
+                f"Updated by Brain command: {command}",
+                "Updated by Brain command.",
+            )
+            return {
+                "matched_issue": top_issue,
+                "match_score": round(top_score, 3),
+                "update": update,
+            }
+
+        return {
+            "needs_disambiguation": True,
+            "reason": "Multiple possible issue matches.",
+            "intended_status": status,
+            "candidates": [item for _, item in scored[:5]],
+        }
 
     def _tokenize_for_match(self, text: str) -> set:
         stop = {
