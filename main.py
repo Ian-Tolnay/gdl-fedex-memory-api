@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from airtable_client import AirtableError
 from memory_service import MemoryService
 from models import (
+    BrainCommandRequest,
     ContextBuildRequest,
     FileCaptureRequest,
     MemoryApproveRequest,
@@ -63,6 +64,14 @@ def svc() -> MemoryService:
 def health() -> Dict[str, str]:
     return {"status": "ok", "service": "gdl-fedex-memory-api"}
 
+
+
+@app.post("/brain/command", dependencies=[Depends(require_api_key)])
+def brain_command(req: BrainCommandRequest) -> Dict[str, Any]:
+    try:
+        return svc().brain_command(req)
+    except AirtableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
 @app.get("/project/bootstrap", dependencies=[Depends(require_api_key)])
 def project_bootstrap(

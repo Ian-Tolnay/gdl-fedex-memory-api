@@ -1,11 +1,69 @@
 openapi: 3.1.0
 info:
   title: GDL FedEx Memory Gateway API
-  version: "0.1.4"
+  version: "0.2.0"
   description: Controlled memory gateway for the FedEx In-House Engineer MK2 project.
 servers:
   - url: https://gdl-fedex-memory-api.onrender.com
 paths:
+
+  /brain/command:
+    post:
+      operationId: brainCommand
+      summary: Route a natural-language Brain command
+      description: Interprets simple Brain commands and routes them to memory search, bootstrap, commit, quick capture, review, task, or issue workflows.
+      x-openai-isConsequential: false
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id, command_text]
+              properties:
+                project_id:
+                  type: string
+                  default: gdl-fedex-mk2
+                command_text:
+                  type: string
+                visible_context_summary:
+                  type: string
+                  description: GPT-created summary of visible chat/session when committing memory.
+                source_chat_ref:
+                  type: string
+                scope:
+                  type: string
+                  enum: [active_only, pending_review, active_and_pending, all_non_deprecated, all]
+                  default: active_only
+                token_budget:
+                  type: integer
+                  minimum: 500
+                  maximum: 15000
+                  default: 2500
+                include_raw:
+                  type: boolean
+                  default: false
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+                  default: 10
+                reviewer:
+                  type: string
+                review_status:
+                  type: string
+                  enum: [auto_accepted, pending_review, reviewed, rejected]
+                  default: pending_review
+                auto_status_updates:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Brain command routing result
+
   /health:
     get:
       operationId: healthCheck

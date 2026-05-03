@@ -90,6 +90,33 @@ class IssueBulkStatusUpdateRequest(BaseModel):
     resolution: Optional[str] = None
     note: Optional[str] = None
 
+
+class BrainCommandRequest(BaseModel):
+    """
+    Natural-language command wrapper for Brain.
+
+    This reduces Custom GPT instruction burden by routing commands server-side.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(default="gdl-fedex-mk2")
+    command_text: str = Field(..., min_length=1)
+    visible_context_summary: Optional[str] = Field(
+        default=None,
+        description="GPT-provided summary of the visible conversation/session when committing memory.",
+    )
+    source_chat_ref: Optional[str] = None
+    scope: MemoryScope = Field(default=MemoryScope.active_only)
+    token_budget: int = Field(default=2500, ge=500, le=15000)
+    include_raw: bool = Field(default=False)
+    limit: int = Field(default=10, ge=1, le=50)
+    reviewer: Optional[str] = Field(default=None)
+    review_status: ReviewStatus = Field(default=ReviewStatus.pending_review)
+    auto_status_updates: bool = Field(
+        default=True,
+        description="Conservatively mark matching open tasks/issues complete/resolved during Brain commit.",
+    )
+
 class MemoryWriteRequest(BaseModel):
     """Stable, GPT-friendly memory write envelope."""
     model_config = ConfigDict(extra="forbid")

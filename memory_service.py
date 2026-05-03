@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from airtable_client import AirtableClient, AirtableError, airtable_formula_equals
 from memory_compiler import compile_memory, make_session_id, make_validation_id, utc_now
 from models import (
+    BrainCommandRequest,
     MemorySearchRequest,
     MemoryScope,
     MemoryStatus,
@@ -627,6 +628,355 @@ class MemoryService:
             "error_count": len(errors),
             "updated": updated,
             "errors": errors,
+        }
+
+    def brain_command(self, req: BrainCommandRequest) -> Dict[str, Any]:
+        """
+        Natural-language Brain command router.
+
+        v0.2.0 is deterministic and conservative:
+        - Routes common Brain commands to existing memory endpoints.
+        - Keeps GPT instructions small.
+        - Auto-updates task/issue status only when session text clearly matches open items.
+        """
+        command = (req.command_text or "").strip()
+        intent = self._classify_brain_intent(command)
+
+        response: Dict[str, Any] = {
+            "project_id": req.project_id,
+            "intent": intent,
+            "command_text": command,
+            "router_version": "v0.2.0-deterministic",
+            "actions": [],
+            "warnings": [],
+        }
+
+        if intent == "wake":
+            result = self.project_bootstrap(req.project_id, req.scope)
+            response["actions"].append({"action": "project_bootstrap", "scope": req.scope.value})
+            response["result"] = result
+            return response
+
+        if intent == "search":
+            query = self._extract_brain_query(command)
+            result = self.build_context(
+                req.project_id,
+                query,
+                req.token_budget,
+                record_types=[],
+                include_raw=req.include_raw,
+                scope=req.scope,
+            )
+            response["actions"].append({"action": "build_context", "query": query, "scope": req.scope.value})
+            response["result"] = result
+            return response
+
+        if intent == "pending_review":
+            result = self.pending_reviews(req.project_id, req.limit)
+            response["actions"].append({"action": "pending_reviews", "limit": req.limit})
+            response["result"] = result
+            return response
+
+        if intent == "open_tasks":
+            result = self.open_tasks(req.project_id)
+            response["actions"].append({"action": "open_tasks"})
+            response["result"] = result
+            return response
+
+        if intent == "open_issues":
+            result = self.open_issues(req.project_id)
+            response["actions"].append({"action": "open_issues"})
+            response["result"] = result
+            return response
+
+        if intent == "commit":
+            summary = (req.visible_context_summary or "").strip()
+            if not summary:
+                summary = command
+
+            session_title = self._make_brain_session_title(command, summary)
+            session_req = SessionCloseRequest(
+                project_id=req.project_id,
+                session_title=session_title,
+                session_summary=summary,
+                source_chat_ref=req.source_chat_ref,
+                review_status=req.review_status,
+            )
+            result = self.close_session(session_req)
+            response["actions"].append({"action": "close_session_to_memory", "session_title": session_title})
+            response["result"] = result
+
+            if req.auto_status_updates:
+                auto_updates = self._auto_status_from_text(req.project_id, summary)
+                response["actions"].append({"action": "auto_status_updates", "result": auto_updates})
+                response["auto_status_updates"] = auto_updates
+
+            return response
+
+        # Default: quick capture.
+        capture_type = self._infer_brain_capture_type(command)
+        text = (req.visible_context_summary or command).strip()
+        title = self._make_brain_title(command, capture_type.value)
+
+        quick_req = QuickCaptureRequest(
+            project_id=req.project_id,
+            capture_type=capture_type,
+            text=text,
+            title=title,
+            priority=Priority.high if capture_type in {RecordType.issue, RecordType.decision, RecordType.architecture} else Priority.medium,
+            tags=["brain_command", capture_type.value],
+            source_ref=req.source_chat_ref,
+            review_status=req.review_status,
+        )
+
+        if hasattr(self, "capture_quick"):
+            result = self.capture_quick(quick_req)
+        else:
+            result = self.write_memory(MemoryWriteRequest(
+                project_id=req.project_id,
+                record_type=capture_type,
+                title=title,
+                raw_body=text,
+                human_summary=text[:500],
+                priority=quick_req.priority,
+                tags=quick_req.tags,
+                source_refs=[req.source_chat_ref] if req.source_chat_ref else [],
+                review_status=req.review_status,
+                metadata={"capture_mode": "brain_command"},
+            ))
+
+        response["actions"].append({"action": "quick_capture", "capture_type": capture_type.value})
+        response["result"] = result
+        return response
+
+    def _classify_brain_intent(self, command: str) -> str:
+        c = command.lower().strip()
+
+        if any(p in c for p in [
+            "wake brain",
+            "load project memory",
+            "bring yourself up to date",
+            "bring yourself up-to-date",
+            "check system memory and bring yourself up to date",
+            "latest project goals",
+        ]):
+            return "wake"
+
+        if any(p in c for p in [
+            "brain review",
+            "pending memory",
+            "pending brain",
+            "brain inbox",
+            "awaiting review",
+            "memory reviews",
+        ]):
+            return "pending_review"
+
+        if any(p in c for p in [
+            "open tasks",
+            "active tasks",
+            "current tasks",
+            "what tasks",
+            "tasks we are working on",
+        ]):
+            return "open_tasks"
+
+        if any(p in c for p in [
+            "open issues",
+            "active issues",
+            "current issues",
+            "what issues",
+            "issues we are working on",
+        ]):
+            return "open_issues"
+
+        if any(p in c for p in [
+            "brain commit",
+            "upload all new memory",
+            "log all the things",
+            "log everything",
+            "close this session",
+            "commit this session",
+            "save today's progress",
+            "save today’s progress",
+            "since the last memory upload",
+            "since last memory upload",
+            "since the last brain",
+        ]):
+            return "commit"
+
+        if any(p in c for p in [
+            "search brain",
+            "search system memory",
+            "check brain for",
+            "what does brain remember",
+            "search memory",
+            "build context",
+        ]):
+            return "search"
+
+        return "quick_capture"
+
+    def _extract_brain_query(self, command: str) -> str:
+        c = command.strip()
+
+        patterns = [
+            r"search\s+(?:brain|system memory|memory)(?:\s+for)?\s*(.*)",
+            r"check\s+brain\s+for\s+(.*)",
+            r"what\s+does\s+brain\s+remember\s+(?:about)?\s*(.*)",
+            r"build\s+(?:a\s+)?context(?:\s+pack)?(?:\s+for)?\s*(.*)",
+        ]
+
+        for pattern in patterns:
+            m = re.search(pattern, c, flags=re.IGNORECASE)
+            if m and m.group(1).strip():
+                return m.group(1).strip(" .?")
+
+        return c
+
+    def _infer_brain_capture_type(self, command: str) -> RecordType:
+        c = command.lower()
+
+        if any(w in c for w in ["issue", "bug", "problem", "error", "blocked", "blocker", "failure", "failed"]):
+            return RecordType.issue
+
+        if any(w in c for w in ["task", "todo", "to-do", "next action", "action item", "need to"]):
+            return RecordType.task
+
+        if any(w in c for w in ["decision", "decided", "choose", "chosen", "confirmed direction"]):
+            return RecordType.decision
+
+        if any(w in c for w in ["architecture", "endpoint", "schema", "data model", "system design", "flow"]):
+            return RecordType.architecture
+
+        if any(w in c for w in ["validation", "test passed", "test failed", "verified", "smoke test"]):
+            return RecordType.validation
+
+        return RecordType.note
+
+    def _make_brain_title(self, command: str, fallback_type: str) -> str:
+        cleaned = re.sub(r"^(brain\s+save|save|remember|log|add\s+this)\s*[:\-]?\s*", "", command.strip(), flags=re.IGNORECASE)
+        cleaned = cleaned.strip()
+        if not cleaned:
+            return f"Brain {fallback_type} capture"
+        return cleaned[:180]
+
+    def _make_brain_session_title(self, command: str, summary: str) -> str:
+        if "session title:" in summary.lower():
+            for line in summary.splitlines():
+                if line.lower().startswith("session title:"):
+                    title = line.split(":", 1)[1].strip()
+                    if title:
+                        return title[:180]
+
+        base = command.strip()
+        if len(base) > 20 and not base.lower().startswith("brain commit"):
+            return base[:180]
+
+        first_sentence = re.split(r"[.\n]", summary.strip())[0].strip()
+        return (first_sentence or "Brain session commit")[:180]
+
+    def _tokenize_for_match(self, text: str) -> set:
+        stop = {
+            "that", "this", "with", "from", "into", "have", "were", "been", "being",
+            "task", "issue", "memory", "records", "record", "table", "quick", "capture",
+            "confirmed", "confirm", "test", "testing", "working", "project",
+        }
+        words = re.findall(r"[a-zA-Z0-9_]{4,}", text.lower())
+        return {w for w in words if w not in stop}
+
+    def _overlap_score(self, title: str, text: str) -> float:
+        title_terms = self._tokenize_for_match(title)
+        if not title_terms:
+            return 0.0
+        text_terms = self._tokenize_for_match(text)
+        overlap = len(title_terms & text_terms)
+        return overlap / max(1, len(title_terms))
+
+    def _auto_status_from_text(self, project_id: str, text: str) -> Dict[str, Any]:
+        """
+        Conservative operational cleanup.
+
+        Only marks open tasks/issues closed when the session text contains strong completion/resolution cues
+        and the title overlap is high enough.
+        """
+        lower = text.lower()
+
+        completion_cues = [
+            "completed",
+            "done",
+            "finished",
+            "verified",
+            "confirmed",
+            "passed",
+            "working as intended",
+            "working correctly",
+            "successfully tested",
+            "tests passed",
+        ]
+
+        resolution_cues = [
+            "resolved",
+            "fixed",
+            "no longer an issue",
+            "working as intended",
+            "working correctly",
+            "confirmed fixed",
+            "issue resolved",
+            "tests passed",
+        ]
+
+        negative_cues = [
+            "not complete",
+            "not completed",
+            "not done",
+            "not resolved",
+            "still failing",
+            "still broken",
+        ]
+
+        if any(n in lower for n in negative_cues):
+            return {"skipped": "Negative/incomplete cue detected; no automatic status updates applied."}
+
+        updated_tasks: List[Dict[str, Any]] = []
+        updated_issues: List[Dict[str, Any]] = []
+
+        if any(cue in lower for cue in completion_cues) and hasattr(self, "update_task_status"):
+            try:
+                tasks = self.open_tasks(project_id).get("tasks", [])
+                for task in tasks:
+                    title = str(task.get("title") or "")
+                    task_id = str(task.get("task_id") or "")
+                    if task_id and self._overlap_score(title, text) >= 0.55:
+                        updated_tasks.append(self.update_task_status(
+                            task_id,
+                            "complete",
+                            "Auto-completed by Brain command router from session commit evidence.",
+                        ))
+            except Exception as exc:
+                updated_tasks.append({"error": str(exc)})
+
+        if any(cue in lower for cue in resolution_cues) and hasattr(self, "update_issue_status"):
+            try:
+                issues = self.open_issues(project_id).get("issues", [])
+                for issue in issues:
+                    title = str(issue.get("title") or "")
+                    issue_id = str(issue.get("issue_id") or "")
+                    if issue_id and self._overlap_score(title, text) >= 0.55:
+                        updated_issues.append(self.update_issue_status(
+                            issue_id,
+                            "resolved",
+                            "Auto-resolved by Brain command router from session commit evidence.",
+                            "Conservative title-overlap match from Brain commit.",
+                        ))
+            except Exception as exc:
+                updated_issues.append({"error": str(exc)})
+
+        return {
+            "updated_tasks": updated_tasks,
+            "updated_issues": updated_issues,
+            "task_count": len([x for x in updated_tasks if "error" not in x]),
+            "issue_count": len([x for x in updated_issues if "error" not in x]),
         }
 
     def _find_memory_record(self, memory_id: str) -> Dict[str, Any]:
