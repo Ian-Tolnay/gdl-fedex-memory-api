@@ -937,9 +937,7 @@ class MemoryService:
         return (first_sentence or "Brain session commit")[:180]
 
     def _parse_brain_commit_sections(self, text: str) -> Dict[str, Any]:
-        text = text.replace("\r\n", "
-").replace("\n", "
-")
+        text = text.replace("\\r\\n", chr(10)).replace("\\n", chr(10))
 
         # Parse a GPT-provided visible_context_summary into structured session sections.
         buckets: Dict[str, List[str]] = {
