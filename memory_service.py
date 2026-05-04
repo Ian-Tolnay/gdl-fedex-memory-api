@@ -646,7 +646,7 @@ class MemoryService:
             "project_id": req.project_id,
             "intent": intent,
             "command_text": command,
-            "router_version": "v0.2.2-deterministic",
+            "router_version": "v0.2.3-deterministic",
             "actions": [],
             "warnings": [],
         }
@@ -722,14 +722,14 @@ class MemoryService:
                 source_chat_ref=req.source_chat_ref,
                 review_status=req.review_status,
             )
+            if req.auto_status_updates:
+                auto_updates = self._auto_status_from_text(req.project_id, summary)
+                response["actions"].append({"action": "auto_status_updates_pre_commit", "result": auto_updates})
+                response["auto_status_updates"] = auto_updates
+
             result = self.close_session(session_req)
             response["actions"].append({"action": "close_session_to_memory", "session_title": session_title})
             response["result"] = result
-
-            if req.auto_status_updates:
-                auto_updates = self._auto_status_from_text(req.project_id, summary)
-                response["actions"].append({"action": "auto_status_updates", "result": auto_updates})
-                response["auto_status_updates"] = auto_updates
 
             return response
 
