@@ -646,7 +646,7 @@ class MemoryService:
             "project_id": req.project_id,
             "intent": intent,
             "command_text": command,
-            "router_version": "v0.2.0-deterministic",
+            "router_version": "v0.2.2-deterministic",
             "actions": [],
             "warnings": [],
         }
@@ -771,6 +771,16 @@ class MemoryService:
 
     def _classify_brain_intent(self, command: str) -> str:
         c = command.lower().strip()
+        if any(p in c for p in [
+            "brain save",
+            "save this",
+            "remember this",
+            "log this",
+            "add this to brain",
+            "brain note",
+        ]):
+            return "quick_capture"
+
 
         if any(p in c for p in [
             "brain done",
@@ -927,6 +937,10 @@ class MemoryService:
         return (first_sentence or "Brain session commit")[:180]
 
     def _parse_brain_commit_sections(self, text: str) -> Dict[str, Any]:
+        text = text.replace("\r\n", "
+").replace("\n", "
+")
+
         # Parse a GPT-provided visible_context_summary into structured session sections.
         buckets: Dict[str, List[str]] = {
             "summary": [],
